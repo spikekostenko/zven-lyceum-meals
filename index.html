@@ -17,8 +17,7 @@
       box-sizing: border-box;
     }
 
-    html,
-    body {
+    html, body {
       margin: 0;
       padding: 0;
       width: 100%;
@@ -47,6 +46,55 @@
       font-size: 32px;
       line-height: 1.15;
       font-weight: 800;
+    }
+
+    /* PIN */
+
+    #pinScreen {
+      margin-top: 25px;
+    }
+
+    .pinTitle {
+      text-align: center;
+      font-size: 21px;
+      font-weight: 750;
+      margin-bottom: 14px;
+    }
+
+    #pinInput {
+      width: 100%;
+      height: 64px;
+      border: 2px solid #c7c7c7;
+      border-radius: 14px;
+      background: white;
+      font-size: 28px;
+      font-weight: 750;
+      text-align: center;
+      letter-spacing: 8px;
+      outline: none;
+    }
+
+    #pinInput:focus {
+      border-color: #1a73e8;
+    }
+
+    #pinMessage {
+      display: none;
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 700;
+      background: #fde2e1;
+      color: #a50e0e;
+      border: 2px solid #d93025;
+    }
+
+    /* ГОЛОВНИЙ ЕКРАН */
+
+    #mainScreen {
+      display: none;
     }
 
     #reader {
@@ -80,6 +128,10 @@
       opacity: 0.55;
     }
 
+    #loginButton {
+      background: #1a73e8;
+    }
+
     #issueButton {
       background: #1a73e8;
     }
@@ -93,6 +145,15 @@
       background: #ffffff;
       color: #333333;
       border: 2px solid #c7c7c7;
+    }
+
+    #logoutButton {
+      background: transparent;
+      color: #5f6368;
+      border: 2px solid #c7c7c7;
+      min-height: 52px;
+      font-size: 17px;
+      margin-top: 25px;
     }
 
     #modeTitle {
@@ -184,41 +245,88 @@
 
   <h1>Сканер харчування</h1>
 
-  <div id="modeTitle"></div>
+  <!-- PIN -->
 
-  <div id="reader"></div>
+  <div id="pinScreen">
 
-  <button
-    id="issueButton"
-    class="button"
-    onclick="selectMode('issue')"
-  >
-    Видати харчування
-  </button>
+    <div class="pinTitle">
+      Введіть PIN-код
+    </div>
 
-  <button
-    id="checkButton"
-    class="button"
-    onclick="selectMode('check')"
-  >
-    Перевірити QR-код
-  </button>
+    <input
+      id="pinInput"
+      type="password"
+      inputmode="numeric"
+      autocomplete="off"
+      maxlength="6"
+      placeholder="••••••"
+    >
 
-  <button
-    id="backButton"
-    class="button"
-    onclick="goBack()"
-  >
-    Назад
-  </button>
+    <button
+      id="loginButton"
+      class="button"
+      onclick="login()"
+    >
+      Увійти
+    </button>
 
-  <div id="result"></div>
+    <div id="pinMessage">
+      Невірний PIN
+    </div>
 
-  <div class="hint" id="hint">
-    Оберіть потрібну дію
+  </div>
+
+
+  <!-- ОСНОВНИЙ ЕКРАН -->
+
+  <div id="mainScreen">
+
+    <div id="modeTitle"></div>
+
+    <div id="reader"></div>
+
+    <button
+      id="issueButton"
+      class="button"
+      onclick="selectMode('issue')"
+    >
+      Видати харчування
+    </button>
+
+    <button
+      id="checkButton"
+      class="button"
+      onclick="selectMode('check')"
+    >
+      Перевірити QR-код
+    </button>
+
+    <button
+      id="backButton"
+      class="button"
+      onclick="goBack()"
+    >
+      Назад
+    </button>
+
+    <div id="result"></div>
+
+    <div class="hint" id="hint">
+      Оберіть потрібну дію
+    </div>
+
+    <button
+      id="logoutButton"
+      class="button"
+      onclick="logout()"
+    >
+      Забути PIN на цьому пристрої
+    </button>
+
   </div>
 
 </div>
+
 
 <script>
 
@@ -231,6 +339,103 @@ let scanner = null;
 let processing = false;
 let audioContext = null;
 let currentMode = null;
+let scannerPin = '';
+
+
+// ==============================
+// ЗАПУСК СТОРІНКИ
+// ==============================
+
+window.addEventListener('load', function() {
+
+  const savedPin =
+    localStorage.getItem('zvenScannerPin');
+
+  if (savedPin) {
+    scannerPin = savedPin;
+    showMainScreen();
+  }
+});
+
+
+// ==============================
+// PIN
+// ==============================
+
+function login() {
+
+  const pin =
+    document.getElementById('pinInput').value.trim();
+
+  if (!/^\d{6}$/.test(pin)) {
+
+    showPinError(
+      'Введіть 6-значний PIN'
+    );
+
+    return;
+  }
+
+  scannerPin = pin;
+
+  localStorage.setItem(
+    'zvenScannerPin',
+    pin
+  );
+
+  document.getElementById('pinMessage').style.display =
+    'none';
+
+  showMainScreen();
+}
+
+
+function showPinError(message) {
+
+  const box =
+    document.getElementById('pinMessage');
+
+  box.textContent = message;
+  box.style.display = 'block';
+}
+
+
+function showMainScreen() {
+
+  document.getElementById('pinScreen').style.display =
+    'none';
+
+  document.getElementById('mainScreen').style.display =
+    'block';
+}
+
+
+async function logout() {
+
+  await stopScanner();
+
+  localStorage.removeItem(
+    'zvenScannerPin'
+  );
+
+  scannerPin = '';
+  currentMode = null;
+  processing = false;
+
+  document.getElementById('mainScreen').style.display =
+    'none';
+
+  document.getElementById('pinScreen').style.display =
+    'block';
+
+  document.getElementById('pinInput').value =
+    '';
+
+  document.getElementById('pinMessage').style.display =
+    'none';
+
+  resetMainScreen();
+}
 
 
 // ==============================
@@ -241,24 +446,40 @@ async function selectMode(mode) {
 
   currentMode = mode;
 
-  document.getElementById('issueButton').style.display = 'none';
-  document.getElementById('checkButton').style.display = 'none';
+  document.getElementById('issueButton').style.display =
+    'none';
 
-  document.getElementById('backButton').style.display = 'block';
-  document.getElementById('reader').style.display = 'block';
+  document.getElementById('checkButton').style.display =
+    'none';
 
-  const modeTitle = document.getElementById('modeTitle');
-  modeTitle.style.display = 'block';
+  document.getElementById('logoutButton').style.display =
+    'none';
+
+  document.getElementById('backButton').style.display =
+    'block';
+
+  document.getElementById('reader').style.display =
+    'block';
+
+  const modeTitle =
+    document.getElementById('modeTitle');
+
+  modeTitle.style.display =
+    'block';
 
   if (mode === 'issue') {
-    modeTitle.textContent = 'Видача харчування';
+
+    modeTitle.textContent =
+      'Видача харчування';
 
     document.getElementById('hint').textContent =
       'Наведіть камеру на QR-картку учня';
   }
 
   if (mode === 'check') {
-    modeTitle.textContent = 'Перевірка QR-коду';
+
+    modeTitle.textContent =
+      'Перевірка QR-коду';
 
     document.getElementById('hint').textContent =
       'Проскануйте картку, щоб дізнатися, кому вона належить';
@@ -271,7 +492,7 @@ async function selectMode(mode) {
 
 
 // ==============================
-// ЗАПУСК КАМЕРИ
+// КАМЕРА
 // ==============================
 
 async function startScanner() {
@@ -279,25 +500,22 @@ async function startScanner() {
   try {
 
     if (!audioContext) {
+
       audioContext =
-        new (window.AudioContext || window.webkitAudioContext)();
+        new (
+          window.AudioContext ||
+          window.webkitAudioContext
+        )();
     }
 
     if (audioContext.state === 'suspended') {
       await audioContext.resume();
     }
 
-    if (scanner) {
-      try {
-        await scanner.stop();
-      } catch (e) {}
+    await stopScanner();
 
-      try {
-        await scanner.clear();
-      } catch (e) {}
-    }
-
-    scanner = new Html5Qrcode('reader');
+    scanner =
+      new Html5Qrcode('reader');
 
     await scanner.start(
       {
@@ -306,7 +524,10 @@ async function startScanner() {
       {
         fps: 12,
 
-        qrbox: function(viewfinderWidth, viewfinderHeight) {
+        qrbox: function(
+          viewfinderWidth,
+          viewfinderHeight
+        ) {
 
           const size =
             Math.floor(
@@ -338,8 +559,26 @@ async function startScanner() {
 }
 
 
+async function stopScanner() {
+
+  if (!scanner) {
+    return;
+  }
+
+  try {
+    await scanner.stop();
+  } catch (e) {}
+
+  try {
+    await scanner.clear();
+  } catch (e) {}
+
+  scanner = null;
+}
+
+
 // ==============================
-// УСПІШНЕ ЗЧИТУВАННЯ QR
+// СКАНУВАННЯ
 // ==============================
 
 function onScanSuccess(decodedText) {
@@ -367,7 +606,7 @@ function onScanSuccess(decodedText) {
 
 
 // ==============================
-// ВИДАЧА ХАРЧУВАННЯ
+// ВИДАЧА
 // ==============================
 
 function sendIssue(qrValue) {
@@ -377,16 +616,7 @@ function sendIssue(qrValue) {
     qrValue,
     function(response) {
 
-      if (!response) {
-
-        showResult(
-          'Некоректна відповідь сервера.',
-          'error'
-        );
-
-        playErrorSound();
-        releaseScanner();
-
+      if (!handleAuthorization(response)) {
         return;
       }
 
@@ -430,7 +660,8 @@ function sendIssue(qrValue) {
       else {
 
         showResult(
-          response.message || 'QR-код недійсний.',
+          response.message ||
+          'QR-код недійсний.',
           'error'
         );
 
@@ -454,16 +685,7 @@ function sendCheck(qrValue) {
     qrValue,
     function(response) {
 
-      if (!response) {
-
-        showResult(
-          'Некоректна відповідь сервера.',
-          'error'
-        );
-
-        playErrorSound();
-        releaseScanner();
-
+      if (!handleAuthorization(response)) {
         return;
       }
 
@@ -482,7 +704,8 @@ function sendCheck(qrValue) {
       else {
 
         showResult(
-          response.message || 'QR-код недійсний.',
+          response.message ||
+          'QR-код недійсний.',
           'error'
         );
 
@@ -496,10 +719,76 @@ function sendCheck(qrValue) {
 
 
 // ==============================
-// JSONP ЗАПИТ ДО APPS SCRIPT
+// ПЕРЕВІРКА АВТОРИЗАЦІЇ
 // ==============================
 
-function sendRequest(apiMode, qrValue, onSuccess) {
+function handleAuthorization(response) {
+
+  if (!response) {
+
+    showResult(
+      'Некоректна відповідь сервера.',
+      'error'
+    );
+
+    playErrorSound();
+    releaseScanner();
+
+    return false;
+  }
+
+  if (response.status === 'unauthorized') {
+
+    localStorage.removeItem(
+      'zvenScannerPin'
+    );
+
+    scannerPin = '';
+
+    showResult(
+      'НЕВІРНИЙ PIN',
+      'error'
+    );
+
+    playErrorSound();
+
+    setTimeout(async function() {
+
+      await stopScanner();
+
+      document.getElementById('mainScreen').style.display =
+        'none';
+
+      document.getElementById('pinScreen').style.display =
+        'block';
+
+      document.getElementById('pinInput').value =
+        '';
+
+      showPinError(
+        'Невірний PIN. Введіть PIN ще раз.'
+      );
+
+      processing = false;
+
+    }, 1500);
+
+    return false;
+  }
+
+  return true;
+}
+
+
+// ==============================
+// ЗАПИТ ДО СЕРВЕРА
+// ==============================
+
+function sendRequest(
+  apiMode,
+  qrValue,
+  onSuccess
+) {
 
   const callbackName =
     'scanCallback_' +
@@ -567,7 +856,8 @@ function sendRequest(apiMode, qrValue, onSuccess) {
     try {
       delete window[callbackName];
     } catch (e) {
-      window[callbackName] = undefined;
+      window[callbackName] =
+        undefined;
     }
   }
 
@@ -578,6 +868,8 @@ function sendRequest(apiMode, qrValue, onSuccess) {
     encodeURIComponent(apiMode) +
     '&qr=' +
     encodeURIComponent(qrValue) +
+    '&pin=' +
+    encodeURIComponent(scannerPin) +
     '&callback=' +
     encodeURIComponent(callbackName) +
     '&_=' +
@@ -589,7 +881,7 @@ function sendRequest(apiMode, qrValue, onSuccess) {
 
 
 // ==============================
-// ПОВЕРНЕННЯ НА ГОЛОВНИЙ ЕКРАН
+// НАЗАД
 // ==============================
 
 async function goBack() {
@@ -597,27 +889,31 @@ async function goBack() {
   processing = false;
   currentMode = null;
 
-  if (scanner) {
+  await stopScanner();
 
-    try {
-      await scanner.stop();
-    } catch (e) {}
+  resetMainScreen();
+}
 
-    try {
-      await scanner.clear();
-    } catch (e) {}
 
-    scanner = null;
-  }
+function resetMainScreen() {
 
-  document.getElementById('reader').style.display = 'none';
+  document.getElementById('reader').style.display =
+    'none';
 
-  document.getElementById('issueButton').style.display = 'block';
-  document.getElementById('checkButton').style.display = 'block';
+  document.getElementById('issueButton').style.display =
+    'block';
 
-  document.getElementById('backButton').style.display = 'none';
+  document.getElementById('checkButton').style.display =
+    'block';
 
-  document.getElementById('modeTitle').style.display = 'none';
+  document.getElementById('logoutButton').style.display =
+    'block';
+
+  document.getElementById('backButton').style.display =
+    'none';
+
+  document.getElementById('modeTitle').style.display =
+    'none';
 
   document.getElementById('hint').textContent =
     'Оберіть потрібну дію';
@@ -627,7 +923,7 @@ async function goBack() {
 
 
 // ==============================
-// РОЗБЛОКУВАННЯ СКАНЕРА
+// ПАУЗА
 // ==============================
 
 function releaseScanner() {
@@ -642,26 +938,38 @@ function releaseScanner() {
 // РЕЗУЛЬТАТ
 // ==============================
 
-function showResult(message, type) {
+function showResult(
+  message,
+  type
+) {
 
   const result =
     document.getElementById('result');
 
-  result.style.display = 'block';
-  result.className = type;
-  result.textContent = message;
+  result.style.display =
+    'block';
+
+  result.className =
+    type;
+
+  result.textContent =
+    message;
 }
+
 
 function hideResult() {
 
   const result =
     document.getElementById('result');
 
-  result.className = '';
+  result.className =
+    '';
 
-  result.textContent = '';
+  result.textContent =
+    '';
 
-  result.style.display = 'none';
+  result.style.display =
+    'none';
 }
 
 
@@ -681,7 +989,8 @@ function playTone(
   }
 
   const start =
-    audioContext.currentTime + delay;
+    audioContext.currentTime +
+    delay;
 
   const oscillator =
     audioContext.createOscillator();
@@ -689,7 +998,8 @@ function playTone(
   const gain =
     audioContext.createGain();
 
-  oscillator.type = 'square';
+  oscillator.type =
+    'square';
 
   oscillator.frequency.value =
     frequency;
@@ -723,8 +1033,6 @@ function playTone(
 }
 
 
-// УСПІШНА ВИДАЧА
-
 function playSuccessSound() {
 
   playTone(
@@ -739,8 +1047,6 @@ function playSuccessSound() {
   }
 }
 
-
-// ВИДАНО ПОЗА ПЛАНОМ
 
 function playUnplannedSound() {
 
@@ -768,8 +1074,6 @@ function playUnplannedSound() {
 }
 
 
-// ПОВТОРНЕ СКАНУВАННЯ
-
 function playDuplicateSound() {
 
   playTone(
@@ -796,8 +1100,6 @@ function playDuplicateSound() {
 }
 
 
-// ПЕРЕВІРКА QR
-
 function playCheckSound() {
 
   playTone(
@@ -812,8 +1114,6 @@ function playCheckSound() {
   }
 }
 
-
-// ПОМИЛКА
 
 function playErrorSound() {
 
