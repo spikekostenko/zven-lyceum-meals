@@ -647,11 +647,10 @@ function showResult(message, type) {
   const result =
     document.getElementById('result');
 
+  result.style.display = 'block';
   result.className = type;
-
   result.textContent = message;
 }
-
 
 function hideResult() {
 
