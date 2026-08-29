@@ -2,11 +2,8 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-  >
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
   <title>Сканер харчування</title>
 
@@ -17,8 +14,7 @@
       box-sizing: border-box;
     }
 
-    html,
-    body {
+    html, body {
       margin: 0;
       padding: 0;
       width: 100%;
@@ -76,7 +72,7 @@
     }
 
     #startButton:disabled {
-      opacity: 0.55;
+      opacity: .55;
     }
 
     #result {
@@ -89,6 +85,7 @@
       font-size: 27px;
       line-height: 1.25;
       font-weight: 850;
+      white-space: pre-line;
     }
 
     #result.success {
@@ -96,6 +93,13 @@
       background: #dff5e5;
       color: #116329;
       border: 4px solid #188038;
+    }
+
+    #result.unplanned {
+      display: block;
+      background: #fff3cd;
+      color: #7a4b00;
+      border: 4px solid #f9ab00;
     }
 
     #result.duplicate {
@@ -164,18 +168,17 @@
 const API_URL =
   'https://script.google.com/macros/s/AKfycbzHzQll8jL7LlWkRIJgC9veIrBZjOR-Zb9dsrUc5_ZsUqtb2sCoTEAhTZKDQdfCKB22Tw/exec';
 
+const SCAN_PAUSE_MS = 3000;
+
 let scanner = null;
 let processing = false;
 let audioContext = null;
 
 
-/* ======================================================
-   ЗАПУСК КАМЕРИ
-   ====================================================== */
-
 async function startScanner() {
 
-  const button = document.getElementById('startButton');
+  const button =
+    document.getElementById('startButton');
 
   button.disabled = true;
   button.textContent = 'Запуск камери...';
@@ -183,13 +186,19 @@ async function startScanner() {
   try {
 
     audioContext =
-      new (window.AudioContext || window.webkitAudioContext)();
+      new (
+        window.AudioContext ||
+        window.webkitAudioContext
+      )();
 
-    if (audioContext.state === 'suspended') {
+    if (
+      audioContext.state === 'suspended'
+    ) {
       await audioContext.resume();
     }
 
-    scanner = new Html5Qrcode('reader');
+    scanner =
+      new Html5Qrcode('reader');
 
     await scanner.start(
       {
@@ -198,11 +207,18 @@ async function startScanner() {
       {
         fps: 12,
 
-        qrbox: function(viewfinderWidth, viewfinderHeight) {
+        qrbox: function(
+          viewfinderWidth,
+          viewfinderHeight
+        ) {
 
-          const size = Math.floor(
-            Math.min(viewfinderWidth, viewfinderHeight) * 0.72
-          );
+          const size =
+            Math.floor(
+              Math.min(
+                viewfinderWidth,
+                viewfinderHeight
+              ) * 0.72
+            );
 
           return {
             width: size,
@@ -210,10 +226,10 @@ async function startScanner() {
           };
         }
       },
+
       onScanSuccess,
-      function() {
-        // QR ще не знайдено — нічого не показуємо.
-      }
+
+      function() {}
     );
 
     button.style.display = 'none';
@@ -221,7 +237,8 @@ async function startScanner() {
   } catch (error) {
 
     button.disabled = false;
-    button.textContent = 'Увімкнути камеру';
+    button.textContent =
+      'Увімкнути камеру';
 
     showResult(
       'Не вдалося запустити камеру. Перевірте дозвіл Safari.',
@@ -233,13 +250,11 @@ async function startScanner() {
 }
 
 
-/* ======================================================
-   QR ЗНАЙДЕНО
-   ====================================================== */
-
 function onScanSuccess(decodedText) {
 
-  if (processing) return;
+  if (processing) {
+    return;
+  }
 
   processing = true;
 
@@ -248,13 +263,11 @@ function onScanSuccess(decodedText) {
     'loading'
   );
 
-  sendScan(decodedText.trim());
+  sendScan(
+    decodedText.trim()
+  );
 }
 
-
-/* ======================================================
-   ВІДПРАВКА НА СЕРВЕР
-   ====================================================== */
 
 function sendScan(studentId) {
 
@@ -262,35 +275,20 @@ function sendScan(studentId) {
     'scanCallback_' +
     Date.now() +
     '_' +
-    Math.floor(Math.random() * 100000);
-
-  const script = document.createElement('script');
-
-  const timer = setTimeout(function() {
-
-    cleanup();
-
-    showResult(
-      'Немає відповіді від сервера.',
-      'error'
+    Math.floor(
+      Math.random() * 100000
     );
 
-    playErrorSound();
+  const script =
+    document.createElement('script');
 
-    releaseScanner();
+  const timer =
+    setTimeout(function() {
 
-  }, 10000);
-
-
-  window[callbackName] = function(response) {
-
-    clearTimeout(timer);
-    cleanup();
-
-    if (!response) {
+      cleanup();
 
       showResult(
-        'Некоректна відповідь сервера.',
+        'Немає відповіді від сервера.',
         'error'
       );
 
@@ -298,59 +296,96 @@ function sendScan(studentId) {
 
       releaseScanner();
 
-      return;
-    }
+    }, 10000);
 
 
-    if (response.status === 'success') {
+  window[callbackName] =
+    function(response) {
+
+      clearTimeout(timer);
+
+      cleanup();
+
+      if (!response) {
+
+        showResult(
+          'Некоректна відповідь сервера.',
+          'error'
+        );
+
+        playErrorSound();
+
+        releaseScanner();
+
+        return;
+      }
+
+
+      if (
+        response.status === 'success' &&
+        response.planned === false
+      ) {
+
+        showResult(
+          response.message,
+          'unplanned'
+        );
+
+        playUnplannedSound();
+
+      } else if (
+        response.status === 'success'
+      ) {
+
+        showResult(
+          response.message,
+          'success'
+        );
+
+        playSuccessSound();
+
+      } else if (
+        response.status === 'duplicate'
+      ) {
+
+        showResult(
+          response.message,
+          'duplicate'
+        );
+
+        playDuplicateSound();
+
+      } else {
+
+        showResult(
+          response.message ||
+          'QR-код недійсний.',
+          'error'
+        );
+
+        playErrorSound();
+      }
+
+      releaseScanner();
+    };
+
+
+  script.onerror =
+    function() {
+
+      clearTimeout(timer);
+
+      cleanup();
 
       showResult(
-        response.message,
-        'success'
-      );
-
-      playSuccessSound();
-
-
-    } else if (response.status === 'duplicate') {
-
-      showResult(
-        response.message,
-        'duplicate'
-      );
-
-      playDuplicateSound();
-
-
-    } else {
-
-      showResult(
-        response.message || 'QR-код недійсний.',
+        'Помилка зв’язку із сервером.',
         'error'
       );
 
       playErrorSound();
-    }
 
-
-    releaseScanner();
-  };
-
-
-  script.onerror = function() {
-
-    clearTimeout(timer);
-    cleanup();
-
-    showResult(
-      'Помилка зв’язку із сервером.',
-      'error'
-    );
-
-    playErrorSound();
-
-    releaseScanner();
-  };
+      releaseScanner();
+    };
 
 
   function cleanup() {
@@ -370,33 +405,35 @@ function sendScan(studentId) {
   script.src =
     API_URL +
     '?api=scan' +
-    '&studentId=' + encodeURIComponent(studentId) +
-    '&callback=' + encodeURIComponent(callbackName) +
-    '&_=' + Date.now();
+    '&studentId=' +
+    encodeURIComponent(studentId) +
+    '&callback=' +
+    encodeURIComponent(callbackName) +
+    '&_=' +
+    Date.now();
 
   document.body.appendChild(script);
 }
 
 
-/* ======================================================
-   НАСТУПНЕ СКАНУВАННЯ
-   ====================================================== */
-
 function releaseScanner() {
 
+  /*
+   * Протягом 3 секунд після результату
+   * жоден QR не може бути зчитаний.
+   */
   setTimeout(function() {
 
     processing = false;
 
-  }, 1800);
+  }, SCAN_PAUSE_MS);
 }
 
 
-/* ======================================================
-   ВІДОБРАЖЕННЯ РЕЗУЛЬТАТУ
-   ====================================================== */
-
-function showResult(message, type) {
+function showResult(
+  message,
+  type
+) {
 
   const result =
     document.getElementById('result');
@@ -406,13 +443,23 @@ function showResult(message, type) {
 }
 
 
-/* ======================================================
-   БАЗОВИЙ ЗВУК
-   ====================================================== */
+/*
+ * Гучні сигнали.
+ * На iPhone фактична максимальна
+ * гучність також залежить від
+ * системної гучності пристрою.
+ */
 
-function playTone(frequency, duration, delay = 0) {
+function playTone(
+  frequency,
+  duration,
+  delay = 0,
+  volume = 0.95
+) {
 
-  if (!audioContext) return;
+  if (!audioContext) {
+    return;
+  }
 
   const start =
     audioContext.currentTime + delay;
@@ -423,13 +470,18 @@ function playTone(frequency, duration, delay = 0) {
   const gain =
     audioContext.createGain();
 
-  oscillator.type = 'sine';
-  oscillator.frequency.value = frequency;
+  oscillator.type = 'square';
 
-  gain.gain.setValueAtTime(0.0001, start);
+  oscillator.frequency.value =
+    frequency;
+
+  gain.gain.setValueAtTime(
+    0.0001,
+    start
+  );
 
   gain.gain.exponentialRampToValueAtTime(
-    0.18,
+    volume,
     start + 0.01
   );
 
@@ -442,51 +494,118 @@ function playTone(frequency, duration, delay = 0) {
   gain.connect(audioContext.destination);
 
   oscillator.start(start);
-  oscillator.stop(start + duration);
+  oscillator.stop(
+    start + duration
+  );
 }
 
 
-/* ======================================================
-   ✅ УСПІХ — ОДИН ВИСОКИЙ ПІК
-   ====================================================== */
-
+/*
+ * УСПІШНО:
+ * один чіткий високий сигнал.
+ */
 function playSuccessSound() {
 
-  playTone(950, 0.16);
+  playTone(
+    1050,
+    0.28,
+    0,
+    0.95
+  );
 
   if (navigator.vibrate) {
-    navigator.vibrate(100);
+    navigator.vibrate(150);
   }
 }
 
 
-/* ======================================================
-   ⚠️ УЖЕ ВИДАНО — ДВА СИГНАЛИ
-   ====================================================== */
+/*
+ * ПОЗА ПЛАНОМ:
+ * два різних сигнали.
+ */
+function playUnplannedSound() {
 
+  playTone(
+    850,
+    0.22,
+    0,
+    0.95
+  );
+
+  playTone(
+    1150,
+    0.30,
+    0.28,
+    0.95
+  );
+
+  if (navigator.vibrate) {
+    navigator.vibrate(
+      [150, 100, 200]
+    );
+  }
+}
+
+
+/*
+ * УЖЕ ВИДАНО:
+ * два однакові сигнали.
+ */
 function playDuplicateSound() {
 
-  playTone(620, 0.14, 0);
-  playTone(620, 0.14, 0.22);
+  playTone(
+    600,
+    0.25,
+    0,
+    0.95
+  );
+
+  playTone(
+    600,
+    0.25,
+    0.32,
+    0.95
+  );
 
   if (navigator.vibrate) {
-    navigator.vibrate([100, 100, 100]);
+    navigator.vibrate(
+      [150, 120, 150]
+    );
   }
 }
 
 
-/* ======================================================
-   ❌ ПОМИЛКА — ТРИ НИЗЬКІ СИГНАЛИ
-   ====================================================== */
-
+/*
+ * ПОМИЛКА:
+ * три низькі спадні сигнали.
+ */
 function playErrorSound() {
 
-  playTone(260, 0.18, 0);
-  playTone(220, 0.18, 0.24);
-  playTone(180, 0.25, 0.48);
+  playTone(
+    350,
+    0.25,
+    0,
+    0.95
+  );
+
+  playTone(
+    260,
+    0.25,
+    0.30,
+    0.95
+  );
+
+  playTone(
+    180,
+    0.35,
+    0.60,
+    0.95
+  );
 
   if (navigator.vibrate) {
-    navigator.vibrate([150, 80, 150]);
+    navigator.vibrate(
+      [200, 100, 200, 100, 250]
+    );
   }
 }
 
