@@ -340,13 +340,18 @@
 const API_URL =
   'https://script.google.com/macros/s/AKfycbzHzQll8jL7LlWkRIJgC9veIrBZjOR-Zb9dsrUc5_ZsUqtb2sCoTEAhTZKDQdfCKB22Tw/exec';
 
-const SCAN_PAUSE_MS = 3000;
+const NEXT_SCAN_DELAY_MS = 500;
+const SAME_QR_BLOCK_MS = 5000;
+const FIRST_REQUEST_TIMEOUT_MS = 7000;
+const RETRY_REQUEST_TIMEOUT_MS = 12000;
 
 let scanner = null;
 let processing = false;
 let audioContext = null;
 let currentMode = null;
 let scannerPin = '';
+let lastQrValue = '';
+let lastQrAt = 0;
 
 
 // ==============================
@@ -428,6 +433,8 @@ async function logout() {
   scannerPin = '';
   currentMode = null;
   processing = false;
+  lastQrValue = '';
+  lastQrAt = 0;
 
   document.getElementById('mainScreen').style.display =
     'none';
@@ -594,15 +601,27 @@ function onScanSuccess(decodedText) {
     return;
   }
 
+  const qrValue =
+    decodedText.trim();
+
+  const now = Date.now();
+
+  if (
+    qrValue === lastQrValue &&
+    now - lastQrAt < SAME_QR_BLOCK_MS
+  ) {
+    return;
+  }
+
+  lastQrValue = qrValue;
+  lastQrAt = now;
+
   processing = true;
 
   showResult(
     'Перевірка...',
     'loading'
   );
-
-  const qrValue =
-    decodedText.trim();
 
   if (currentMode === 'check') {
     sendCheck(qrValue);
@@ -617,6 +636,8 @@ function onScanSuccess(decodedText) {
 // ==============================
 
 function sendIssue(qrValue) {
+
+  const requestId = createRequestId();
 
   sendRequest(
     'scan',
@@ -676,6 +697,10 @@ function sendIssue(qrValue) {
       }
 
       releaseScanner();
+    },
+    {
+      requestId: requestId,
+      attempt: 0
     }
   );
 }
@@ -720,6 +745,10 @@ function sendCheck(qrValue) {
       }
 
       releaseScanner();
+    },
+    {
+      requestId: createRequestId(),
+      attempt: 0
     }
   );
 }
@@ -794,8 +823,22 @@ function handleAuthorization(response) {
 function sendRequest(
   apiMode,
   qrValue,
-  onSuccess
+  onSuccess,
+  options
 ) {
+
+  options = options || {};
+
+  const requestId =
+    options.requestId || createRequestId();
+
+  const attempt =
+    Number(options.attempt || 0);
+
+  const timeoutMs =
+    attempt === 0
+      ? FIRST_REQUEST_TIMEOUT_MS
+      : RETRY_REQUEST_TIMEOUT_MS;
 
   const callbackName =
     'scanCallback_' +
@@ -808,25 +851,64 @@ function sendRequest(
   const script =
     document.createElement('script');
 
-  const timer =
-    setTimeout(function() {
+  let finished = false;
+  let timer = null;
 
-      cleanup();
+
+  function retryOrFail() {
+
+    if (finished) return;
+
+    finished = true;
+
+    if (timer) {
+      clearTimeout(timer);
+    }
+
+    cleanup();
+
+    if (attempt === 0) {
 
       showResult(
-        'Немає відповіді від сервера.',
-        'error'
+        'Відповідь затримується.\nПеревіряємо результат...',
+        'loading'
       );
 
-      playErrorSound();
+      sendRequest(
+        apiMode,
+        qrValue,
+        onSuccess,
+        {
+          requestId: requestId,
+          attempt: 1
+        }
+      );
 
-      releaseScanner();
+      return;
+    }
 
-    }, 10000);
+    showResult(
+      'Не вдалося отримати відповідь сервера.\nСпробуйте ще раз.',
+      'error'
+    );
+
+    playErrorSound();
+    releaseScanner();
+  }
+
+
+  timer = setTimeout(
+    retryOrFail,
+    timeoutMs
+  );
 
 
   window[callbackName] =
     function(response) {
+
+      if (finished) return;
+
+      finished = true;
 
       clearTimeout(timer);
 
@@ -838,19 +920,7 @@ function sendRequest(
 
   script.onerror =
     function() {
-
-      clearTimeout(timer);
-
-      cleanup();
-
-      showResult(
-        'Помилка зв’язку із сервером.',
-        'error'
-      );
-
-      playErrorSound();
-
-      releaseScanner();
+      retryOrFail();
     };
 
 
@@ -877,6 +947,8 @@ function sendRequest(
     encodeURIComponent(qrValue) +
     '&pin=' +
     encodeURIComponent(scannerPin) +
+    '&requestId=' +
+    encodeURIComponent(requestId) +
     '&callback=' +
     encodeURIComponent(callbackName) +
     '&_=' +
@@ -884,6 +956,15 @@ function sendRequest(
 
 
   document.body.appendChild(script);
+}
+
+
+function createRequestId() {
+  return (
+    Date.now().toString(36) +
+    '_' +
+    Math.random().toString(36).slice(2, 10)
+  );
 }
 
 
@@ -937,7 +1018,7 @@ function releaseScanner() {
 
   setTimeout(function() {
     processing = false;
-  }, SCAN_PAUSE_MS);
+  }, NEXT_SCAN_DELAY_MS);
 }
 
 
