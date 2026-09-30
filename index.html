@@ -342,8 +342,8 @@ const API_URL =
 
 const NEXT_SCAN_DELAY_MS = 500;
 const SAME_QR_BLOCK_MS = 5000;
-const FIRST_REQUEST_TIMEOUT_MS = 7000;
-const RETRY_REQUEST_TIMEOUT_MS = 12000;
+const SLOW_RESPONSE_NOTICE_MS = 7000;
+const REQUEST_TIMEOUT_MS = 60000;
 
 let scanner = null;
 let processing = false;
@@ -699,8 +699,7 @@ function sendIssue(qrValue) {
       releaseScanner();
     },
     {
-      requestId: requestId,
-      attempt: 0
+      requestId: requestId
     }
   );
 }
@@ -747,8 +746,7 @@ function sendCheck(qrValue) {
       releaseScanner();
     },
     {
-      requestId: createRequestId(),
-      attempt: 0
+      requestId: createRequestId()
     }
   );
 }
@@ -832,14 +830,6 @@ function sendRequest(
   const requestId =
     options.requestId || createRequestId();
 
-  const attempt =
-    Number(options.attempt || 0);
-
-  const timeoutMs =
-    attempt === 0
-      ? FIRST_REQUEST_TIMEOUT_MS
-      : RETRY_REQUEST_TIMEOUT_MS;
-
   const callbackName =
     'scanCallback_' +
     Date.now() +
@@ -852,43 +842,23 @@ function sendRequest(
     document.createElement('script');
 
   let finished = false;
-  let timer = null;
+  let slowTimer = null;
+  let timeoutTimer = null;
 
 
-  function retryOrFail() {
+  function failRequest(message) {
 
     if (finished) return;
 
     finished = true;
 
-    if (timer) {
-      clearTimeout(timer);
-    }
+    clearTimeout(slowTimer);
+    clearTimeout(timeoutTimer);
 
     cleanup();
 
-    if (attempt === 0) {
-
-      showResult(
-        'Відповідь затримується.\nПеревіряємо результат...',
-        'loading'
-      );
-
-      sendRequest(
-        apiMode,
-        qrValue,
-        onSuccess,
-        {
-          requestId: requestId,
-          attempt: 1
-        }
-      );
-
-      return;
-    }
-
     showResult(
-      'Не вдалося отримати відповідь сервера.\nСпробуйте ще раз.',
+      message,
       'error'
     );
 
@@ -897,9 +867,26 @@ function sendRequest(
   }
 
 
-  timer = setTimeout(
-    retryOrFail,
-    timeoutMs
+  slowTimer = setTimeout(
+    function() {
+      if (finished) return;
+
+      showResult(
+        'Відповідь затримується.\nОчікуємо завершення...',
+        'loading'
+      );
+    },
+    SLOW_RESPONSE_NOTICE_MS
+  );
+
+
+  timeoutTimer = setTimeout(
+    function() {
+      failRequest(
+        'Не вдалося отримати відповідь сервера протягом хвилини.\nСпробуйте ще раз.'
+      );
+    },
+    REQUEST_TIMEOUT_MS
   );
 
 
@@ -910,7 +897,8 @@ function sendRequest(
 
       finished = true;
 
-      clearTimeout(timer);
+      clearTimeout(slowTimer);
+      clearTimeout(timeoutTimer);
 
       cleanup();
 
@@ -920,7 +908,9 @@ function sendRequest(
 
   script.onerror =
     function() {
-      retryOrFail();
+      failRequest(
+        'Не вдалося з’єднатися із сервером.\nСпробуйте ще раз.'
+      );
     };
 
 
