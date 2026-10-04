@@ -236,6 +236,19 @@
       color: #555;
     }
 
+    #queueStatus {
+      margin-top: 10px;
+      min-height: 24px;
+      text-align: center;
+      font-size: 16px;
+      font-weight: 700;
+      color: #5f6368;
+    }
+
+    #queueStatus.pending {
+      color: #8a5a00;
+    }
+
     @media (min-width: 700px) {
       #reader {
         min-height: 500px;
@@ -323,6 +336,10 @@
       Оберіть потрібну дію
     </div>
 
+    <div id="queueStatus">
+      У черзі: 0
+    </div>
+
     <button
       id="logoutButton"
       class="button"
@@ -340,10 +357,12 @@
 const API_URL =
   'https://script.google.com/macros/s/AKfycbzHzQll8jL7LlWkRIJgC9veIrBZjOR-Zb9dsrUc5_ZsUqtb2sCoTEAhTZKDQdfCKB22Tw/exec';
 
-const NEXT_SCAN_DELAY_MS = 500;
+const NEXT_SCAN_DELAY_MS = 350;
 const SAME_QR_BLOCK_MS = 5000;
 const SLOW_RESPONSE_NOTICE_MS = 7000;
 const REQUEST_TIMEOUT_MS = 60000;
+const QUEUE_RETRY_MS = 3000;
+const SCAN_QUEUE_STORAGE_KEY = 'zvenMealScanQueueV1';
 
 let scanner = null;
 let processing = false;
@@ -352,6 +371,14 @@ let currentMode = null;
 let scannerPin = '';
 let lastQrValue = '';
 let lastQrAt = 0;
+let scannerReady = false;
+let scannerDateKey = '';
+let studentsByQr = Object.create(null);
+let issuedStudentIds = new Set();
+let scanQueue = loadScanQueue();
+let queueProcessing = false;
+let queueRetryTimer = null;
+let lastDisplayedStudentId = '';
 
 
 // ==============================
@@ -366,6 +393,7 @@ window.addEventListener('load', function() {
   if (savedPin) {
     scannerPin = savedPin;
     showMainScreen();
+    loadScannerData();
   }
 });
 
@@ -399,6 +427,7 @@ function login() {
     'none';
 
   showMainScreen();
+  loadScannerData();
 }
 
 
@@ -419,6 +448,13 @@ function showMainScreen() {
 
   document.getElementById('mainScreen').style.display =
     'block';
+
+  setScannerReady(false);
+
+  document.getElementById('hint').textContent =
+    'Завантаження даних сканера...';
+
+  updateQueueStatus();
 }
 
 
@@ -435,6 +471,17 @@ async function logout() {
   processing = false;
   lastQrValue = '';
   lastQrAt = 0;
+  scannerReady = false;
+  scannerDateKey = '';
+  studentsByQr = Object.create(null);
+  issuedStudentIds = new Set();
+  queueProcessing = false;
+  lastDisplayedStudentId = '';
+
+  if (queueRetryTimer) {
+    clearTimeout(queueRetryTimer);
+    queueRetryTimer = null;
+  }
 
   document.getElementById('mainScreen').style.display =
     'none';
@@ -453,10 +500,145 @@ async function logout() {
 
 
 // ==============================
+// ПОЧАТКОВІ ДАНІ СКАНЕРА
+// ==============================
+
+function loadScannerData() {
+
+  setScannerReady(false);
+
+  sendRequest(
+    'bootstrap',
+    '',
+    function(response) {
+
+      if (!handleAuthorization(response)) {
+        return;
+      }
+
+      if (
+        response.status !== 'bootstrap' ||
+        !Array.isArray(response.students)
+      ) {
+        scheduleBootstrapRetry(
+          response.message ||
+          'Не вдалося завантажити дані сканера.'
+        );
+
+        return;
+      }
+
+      scannerDateKey =
+        String(response.date || '');
+
+      studentsByQr =
+        Object.create(null);
+
+      issuedStudentIds =
+        new Set();
+
+      response.students.forEach(
+        function(student) {
+
+          const qr =
+            String(student.qr || '').trim();
+
+          const id =
+            String(student.id || '').trim();
+
+          if (!qr || !id) {
+            return;
+          }
+
+          studentsByQr[qr] = student;
+
+          if (student.issued === true) {
+            issuedStudentIds.add(id);
+          }
+        }
+      );
+
+      scanQueue = scanQueue.filter(
+        function(item) {
+          return (
+            !item.date ||
+            item.date === scannerDateKey
+          );
+        }
+      );
+
+      scanQueue.forEach(
+        function(item) {
+          if (item.studentId) {
+            issuedStudentIds.add(
+              String(item.studentId)
+            );
+          }
+        }
+      );
+
+      saveScanQueue();
+      setScannerReady(true);
+
+      document.getElementById('hint').textContent =
+        'Оберіть потрібну дію';
+
+      updateQueueStatus();
+      processScanQueue();
+    },
+    {
+      requestId: createRequestId(),
+      onSlow: function() {
+        document.getElementById('hint').textContent =
+          'Завантаження триває...';
+      },
+      onFailure: function(message) {
+        scheduleBootstrapRetry(message);
+      }
+    }
+  );
+}
+
+
+function scheduleBootstrapRetry(message) {
+
+  scannerReady = false;
+
+  document.getElementById('hint').textContent =
+    message + ' Повторюємо підключення...';
+
+  if (queueRetryTimer) {
+    clearTimeout(queueRetryTimer);
+  }
+
+  queueRetryTimer = setTimeout(
+    loadScannerData,
+    QUEUE_RETRY_MS
+  );
+}
+
+
+function setScannerReady(ready) {
+
+  scannerReady = ready === true;
+
+  document.getElementById('issueButton').disabled =
+    !scannerReady;
+
+  document.getElementById('checkButton').disabled =
+    !scannerReady;
+}
+
+
+// ==============================
 // ВИБІР РЕЖИМУ
 // ==============================
 
 async function selectMode(mode) {
+
+  if (!scannerReady) {
+    return;
+  }
 
   currentMode = mode;
 
@@ -597,7 +779,7 @@ async function stopScanner() {
 
 function onScanSuccess(decodedText) {
 
-  if (processing) {
+  if (processing || !scannerReady) {
     return;
   }
 
@@ -615,18 +797,29 @@ function onScanSuccess(decodedText) {
 
   lastQrValue = qrValue;
   lastQrAt = now;
-
   processing = true;
 
-  showResult(
-    'Перевірка...',
-    'loading'
-  );
+  const student =
+    studentsByQr[qrValue];
+
+  if (!student) {
+    showResult(
+      'QR НЕДІЙСНИЙ',
+      'error'
+    );
+
+    playErrorSound();
+    releaseScanner();
+    return;
+  }
+
+  lastDisplayedStudentId =
+    String(student.id || '');
 
   if (currentMode === 'check') {
-    sendCheck(qrValue);
+    sendCheck(student);
   } else {
-    sendIssue(qrValue);
+    sendIssue(qrValue, student);
   }
 }
 
@@ -635,71 +828,171 @@ function onScanSuccess(decodedText) {
 // ВИДАЧА
 // ==============================
 
-function sendIssue(qrValue) {
+function sendIssue(qrValue, student) {
 
-  const requestId = createRequestId();
+  const studentId =
+    String(student.id || '');
+
+  if (issuedStudentIds.has(studentId)) {
+    showResult(
+      'УЖЕ ВИДАНО\n' +
+      student.name +
+      '\n' +
+      student.className,
+      'duplicate'
+    );
+
+    playDuplicateSound();
+    releaseScanner();
+    return;
+  }
+
+  const item = {
+    requestId: createRequestId(),
+    qr: qrValue,
+    studentId: studentId,
+    name: student.name,
+    className: student.className,
+    planned: student.planned === true,
+    date: scannerDateKey,
+    createdAt: Date.now()
+  };
+
+  issuedStudentIds.add(studentId);
+  scanQueue.push(item);
+  saveScanQueue();
+  updateQueueStatus();
+
+  if (item.planned) {
+    showResult(
+      'ПРИЙНЯТО\n' +
+      item.name +
+      '\n' +
+      item.className,
+      'success'
+    );
+
+    playSuccessSound();
+  } else {
+    showResult(
+      'ПРИЙНЯТО\n⚠ НЕ БУВ ЗАПЛАНОВАНИЙ\n' +
+      item.name +
+      '\n' +
+      item.className,
+      'unplanned'
+    );
+
+    playUnplannedSound();
+  }
+
+  releaseScanner();
+  processScanQueue();
+}
+
+
+function processScanQueue() {
+
+  if (
+    queueProcessing ||
+    !scannerReady ||
+    !scannerPin ||
+    scanQueue.length === 0
+  ) {
+    updateQueueStatus();
+    return;
+  }
+
+  queueProcessing = true;
+
+  const item = scanQueue[0];
+
+  updateQueueStatus();
 
   sendRequest(
     'scan',
-    qrValue,
+    item.qr,
     function(response) {
+
+      queueProcessing = false;
 
       if (!handleAuthorization(response)) {
         return;
       }
 
       if (
-        response.status === 'success' &&
-        response.planned === false
-      ) {
-
-        showResult(
-          response.message,
-          'unplanned'
-        );
-
-        playUnplannedSound();
-      }
-
-      else if (
-        response.status === 'success'
-      ) {
-
-        showResult(
-          response.message,
-          'success'
-        );
-
-        playSuccessSound();
-      }
-
-      else if (
+        response.status === 'success' ||
         response.status === 'duplicate'
       ) {
+        scanQueue.shift();
+        saveScanQueue();
+        updateQueueStatus();
 
-        showResult(
-          response.message,
-          'duplicate'
+        if (
+          lastDisplayedStudentId ===
+          String(item.studentId)
+        ) {
+          showResult(
+            response.message,
+            response.status === 'duplicate'
+              ? 'duplicate'
+              : (
+                  response.planned === false
+                    ? 'unplanned'
+                    : 'success'
+                )
+          );
+        }
+      } else {
+        scanQueue.shift();
+        issuedStudentIds.delete(
+          String(item.studentId)
         );
 
-        playDuplicateSound();
-      }
-
-      else {
+        saveScanQueue();
+        updateQueueStatus();
 
         showResult(
-          response.message ||
-          'QR-код недійсний.',
+          'НЕ ЗАПИСАНО\n' +
+          item.name +
+          '\n' +
+          (
+            response.message ||
+            'Помилка сервера.'
+          ),
           'error'
         );
 
         playErrorSound();
       }
 
-      releaseScanner();
+      setTimeout(
+        processScanQueue,
+        50
+      );
     },
     {
-      requestId: requestId
+      requestId: item.requestId,
+      onSlow: function() {
+        updateQueueStatus(
+          'Сервер відповідає повільно'
+        );
+      },
+      onFailure: function() {
+        queueProcessing = false;
+
+        updateQueueStatus(
+          'Очікуємо з’єднання'
+        );
+
+        if (queueRetryTimer) {
+          clearTimeout(queueRetryTimer);
+        }
+
+        queueRetryTimer = setTimeout(
+          processScanQueue,
+          QUEUE_RETRY_MS
+        );
+      }
     }
   );
 }
@@ -709,46 +1002,18 @@ function sendIssue(qrValue) {
 // ПЕРЕВІРКА QR
 // ==============================
 
-function sendCheck(qrValue) {
+function sendCheck(student) {
 
-  sendRequest(
-    'check',
-    qrValue,
-    function(response) {
-
-      if (!handleAuthorization(response)) {
-        return;
-      }
-
-      if (
-        response.status === 'check'
-      ) {
-
-        showResult(
-          response.message,
-          'check'
-        );
-
-        playCheckSound();
-      }
-
-      else {
-
-        showResult(
-          response.message ||
-          'QR-код недійсний.',
-          'error'
-        );
-
-        playErrorSound();
-      }
-
-      releaseScanner();
-    },
-    {
-      requestId: createRequestId()
-    }
+  showResult(
+    'КАРТКА НАЛЕЖИТЬ\n' +
+    student.name +
+    '\n' +
+    student.className,
+    'check'
   );
+
+  playCheckSound();
+  releaseScanner();
 }
 
 
@@ -857,6 +1122,13 @@ function sendRequest(
 
     cleanup();
 
+    if (
+      typeof options.onFailure === 'function'
+    ) {
+      options.onFailure(message);
+      return;
+    }
+
     showResult(
       message,
       'error'
@@ -870,6 +1142,13 @@ function sendRequest(
   slowTimer = setTimeout(
     function() {
       if (finished) return;
+
+      if (
+        typeof options.onSlow === 'function'
+      ) {
+        options.onSlow();
+        return;
+      }
 
       showResult(
         'Відповідь затримується.\nОчікуємо завершення...',
@@ -955,6 +1234,62 @@ function createRequestId() {
     '_' +
     Math.random().toString(36).slice(2, 10)
   );
+}
+
+
+function loadScanQueue() {
+
+  try {
+    const value = localStorage.getItem(
+      SCAN_QUEUE_STORAGE_KEY
+    );
+
+    const parsed = JSON.parse(
+      value || '[]'
+    );
+
+    return Array.isArray(parsed)
+      ? parsed
+      : [];
+
+  } catch (e) {
+    return [];
+  }
+}
+
+
+function saveScanQueue() {
+
+  try {
+    localStorage.setItem(
+      SCAN_QUEUE_STORAGE_KEY,
+      JSON.stringify(scanQueue)
+    );
+  } catch (e) {}
+}
+
+
+function updateQueueStatus(detail) {
+
+  const box =
+    document.getElementById('queueStatus');
+
+  if (!box) return;
+
+  const count = scanQueue.length;
+
+  box.className =
+    count > 0 ? 'pending' : '';
+
+  if (count === 0) {
+    box.textContent = 'У черзі: 0';
+    return;
+  }
+
+  box.textContent =
+    'У черзі: ' +
+    count +
+    (detail ? ' • ' + detail : '');
 }
 
 
